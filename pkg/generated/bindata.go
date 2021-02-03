@@ -73,19 +73,19 @@ var _controllerYaml = []byte(`kind: Deployment
 apiVersion: apps/v1
 metadata:
   name: azure-disk-csi-driver-controller
-  namespace: openshift-cluster-csi-drivers  annotations:
+  namespace: openshift-cluster-csi-drivers
   annotations:
     config.openshift.io/inject-proxy: csi-driver
 spec:
-  serviceName: gcp-pd-csi-driver-controller
+  serviceName: azure-disk-csi-driver-controller
   replicas: 1
   selector:
     matchLabels:
-      app: gcp-pd-csi-driver-controller
+      app: azure-disk-csi-driver-controller
   template:
     metadata:
       labels:
-        app: gcp-pd-csi-driver-controller
+        app: azure-disk-csi-driver-controller
     spec:
       hostNetwork: true
       serviceAccount: azure-disk-csi-driver-controller-sa
@@ -109,7 +109,7 @@ spec:
             - name: AZURE_CREDENTIAL_FILE
               value: "/etc/kubernetes/cloud.conf"
             - name: CSI_ENDPOINT
-              value: unix:///csi/csi.sock
+              value: unix:///var/lib/csi/sockets/pluginproxy/csi.sock
           ports:
             - name: healthz
               # Due to hostNetwork, this port is open on a node!
@@ -198,12 +198,15 @@ spec:
         - name: csi-liveness-probe
           image: ${LIVENESS_PROBE_IMAGE}
           args:
-            - --csi-address=/csi/csi.sock
+            - --csi-address=$(ADDRESS)
             - --probe-timeout=3s
             - --health-port=10301
+          env:
+            - name: ADDRESS
+              value: /var/lib/csi/sockets/pluginproxy/csi.sock
           volumeMounts:
             - name: socket-dir
-              mountPath: /csi
+              mountPath: /var/lib/csi/sockets/pluginproxy/
           resources:
             requests:
               memory: 50Mi
@@ -491,6 +494,9 @@ rules:
   - apiGroups: ["storage.k8s.io"]
     resources: ["volumeattachments"]
     verbs: ["get", "list", "watch", "update", "patch"]
+  - apiGroups: ["storage.k8s.io"]
+    resources: ["volumeattachments/status"]
+    verbs: ["patch"]
 `)
 
 func rbacAttacher_roleYamlBytes() ([]byte, error) {
@@ -819,6 +825,7 @@ metadata:
   name: managed-csi
 provisioner: disk.csi.azure.com
 parameters:
+  # TODO: Premium_LRS?
   skuname: StandardSSD_LRS
 volumeBindingMode: WaitForFirstConsumer
 allowVolumeExpansion: true

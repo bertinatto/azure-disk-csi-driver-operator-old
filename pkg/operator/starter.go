@@ -40,7 +40,7 @@ func RunOperator(ctx context.Context, controllerConfig *controllercmd.Controller
 
 	// Create GenericOperatorclient. This is used by the library-go controllers created down below
 	gvr := opv1.SchemeGroupVersion.WithResource("clustercsidrivers")
-	operatorClient, dynamicInformers, err := goc.NewClusterScopedOperatorClientWithConfigName(controllerConfig.KubeConfig, gvr, string(opv1.GCPPDCSIDriver))
+	operatorClient, dynamicInformers, err := goc.NewClusterScopedOperatorClientWithConfigName(controllerConfig.KubeConfig, gvr, "disk.csi.azure.com")
 	if err != nil {
 		return err
 	}
@@ -52,7 +52,7 @@ func RunOperator(ctx context.Context, controllerConfig *controllercmd.Controller
 		operandName,
 		false,
 	).WithStaticResourcesController(
-		"GCPPDDriverStaticResourcesController",
+		"AzureDiskDriverStaticResourcesController",
 		kubeClient,
 		kubeInformersForNamespaces,
 		generated.Asset,
@@ -73,10 +73,10 @@ func RunOperator(ctx context.Context, controllerConfig *controllercmd.Controller
 			"rbac/snapshotter_binding.yaml",
 		},
 	).WithCSIConfigObserverController(
-		"GCPPDDriverCSIConfigObserverController",
+		"AzureDiskDriverCSIConfigObserverController",
 		configInformers,
 	).WithCSIDriverControllerService(
-		"GCPPDDriverControllerServiceController",
+		"AzureDiskDriverControllerServiceController",
 		generated.MustAsset,
 		"controller.yaml",
 		kubeClient,
@@ -84,7 +84,7 @@ func RunOperator(ctx context.Context, controllerConfig *controllercmd.Controller
 		configInformers,
 		csidrivercontrollerservicecontroller.WithObservedProxyDeploymentHook(),
 	).WithCSIDriverNodeService(
-		"GCPPDDriverNodeServiceController",
+		"AzureDiskDriverNodeServiceController",
 		generated.MustAsset,
 		"node.yaml",
 		kubeClient,
