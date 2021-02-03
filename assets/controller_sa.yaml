@@ -2,4 +2,4 @@ apiVersion: v1
 kind: ServiceAccount
 metadata:
   name: azure-disk-csi-driver-controller-sa
-  namespace: openshift-azure-disk-csi-driver
+  namespace: openshift-cluster-csi-drivers

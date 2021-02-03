@@ -2,7 +2,6 @@
 // sources:
 // assets/controller.yaml
 // assets/controller_sa.yaml
-// assets/namespace.yaml
 // assets/node.yaml
 // assets/node_sa.yaml
 // assets/rbac/attacher_binding.yaml
@@ -74,167 +73,141 @@ var _controllerYaml = []byte(`kind: Deployment
 apiVersion: apps/v1
 metadata:
   name: azure-disk-csi-driver-controller
-  namespace: openshift-azure-disk-csi-driver
+  namespace: openshift-cluster-csi-drivers  annotations:
+  annotations:
+    config.openshift.io/inject-proxy: csi-driver
 spec:
+  serviceName: gcp-pd-csi-driver-controller
+  replicas: 1
   selector:
     matchLabels:
-      app: azure-disk-csi-driver-controller
-  serviceName: azure-disk-csi-driver-controller
-  replicas: 1
+      app: gcp-pd-csi-driver-controller
   template:
     metadata:
       labels:
-        app: azure-disk-csi-driver-controller
+        app: gcp-pd-csi-driver-controller
     spec:
       hostNetwork: true
       serviceAccount: azure-disk-csi-driver-controller-sa
       priorityClassName: system-cluster-critical
+      nodeSelector:
+        node-role.kubernetes.io/master: ""
       tolerations:
         - key: CriticalAddonsOnly
           operator: Exists
+        - key: node-role.kubernetes.io/master
+          operator: Exists
+          effect: "NoSchedule"
       containers:
         - name: csi-driver
-          image: mcr.microsoft.com/k8s/csi/azuredisk-csi:latest
-          # image: centos
-          # command: ["/bin/sh"]
-          # args: ["-c", "while true; do echo $(date -u) >> /tmp/out.txt; sleep 5; done"]
-
+          image: ${DRIVER_IMAGE}
           args:
-            - "--v=5"
-            - "--endpoint=$(CSI_ENDPOINT)"
-          ports:
-            - containerPort: 29602
-              name: healthz
-              protocol: TCP
-            - containerPort: 29604
-              name: metrics
-              protocol: TCP
-          livenessProbe:
-            failureThreshold: 5
-            httpGet:
-              path: /healthz
-              port: healthz
-            initialDelaySeconds: 30
-            timeoutSeconds: 10
-            periodSeconds: 30
+            - --endpoint=$(CSI_ENDPOINT)
+            - --logtostderr
+            - --v=${LOG_LEVEL}
           env:
             - name: AZURE_CREDENTIAL_FILE
               value: "/etc/kubernetes/cloud.conf"
             - name: CSI_ENDPOINT
               value: unix:///csi/csi.sock
+          ports:
+            - name: healthz
+              # Due to hostNetwork, this port is open on a node!
+              containerPort: 10301
+              protocol: TCP
           volumeMounts:
-            - mountPath: /csi
-              name: socket-dir
-            - mountPath: /etc/kubernetes/
+            - name: socket-dir
+              mountPath: /var/lib/csi/sockets/pluginproxy/
+            - name: cloud-sa-volume
+              mountPath: /etc/kubernetes/
               readOnly: true
-              name: cloud-sa-volume
-            - mountPath: /var/lib/waagent/ManagedIdentity-Settings
+            - name: msi
+              mountPath: /var/lib/waagent/ManagedIdentity-Settings
               readOnly: true
-              name: msi
           resources:
-            limits:
-              cpu: 1
-              memory: 1Gi
             requests:
+              memory: 50Mi
               cpu: 10m
-              memory: 20Mi
         - name: csi-provisioner
-          image: mcr.microsoft.com/oss/kubernetes-csi/csi-provisioner:v1.5.0
+          image: ${PROVISIONER_IMAGE}
           args:
-            - "--feature-gates=Topology=true"
-            - "--csi-address=$(ADDRESS)"
-            - "--v=5"
-            - "--timeout=120s"
-            - "--enable-leader-election"
-            - "--leader-election-type=leases"
+            - --csi-address=$(ADDRESS)
+            - --default-fstype=ext4
+            - --feature-gates=Topology=true
+            - --extra-create-metadata=true
+            - --v=${LOG_LEVEL}
+            # TODO: check if this is required
+            # - --timeout=120s
+            # - --enable-leader-election
+            # - --leader-election-type=leases
           env:
             - name: ADDRESS
-              value: /csi/csi.sock
+              value: /var/lib/csi/sockets/pluginproxy/csi.sock
           volumeMounts:
-            - mountPath: /csi
-              name: socket-dir
+            - name: socket-dir
+              mountPath: /var/lib/csi/sockets/pluginproxy/
           resources:
-            limits:
-              cpu: 1
-              memory: 1Gi
             requests:
+              memory: 50Mi
               cpu: 10m
-              memory: 20Mi
         - name: csi-attacher
-          image: mcr.microsoft.com/oss/kubernetes-csi/csi-attacher:v2.2.0
+          image: ${ATTACHER_IMAGE}
           args:
-            - "-v=5"
-            - "-csi-address=$(ADDRESS)"
-            - "-timeout=120s"
-            - "-leader-election"
+            - --csi-address=$(ADDRESS)
+            - --v=${LOG_LEVEL}
           env:
             - name: ADDRESS
-              value: /csi/csi.sock
+              value: /var/lib/csi/sockets/pluginproxy/csi.sock
           volumeMounts:
-            - mountPath: /csi
-              name: socket-dir
+            - name: socket-dir
+              mountPath: /var/lib/csi/sockets/pluginproxy/
           resources:
-            limits:
-              cpu: 1
-              memory: 1Gi
             requests:
+              memory: 50Mi
               cpu: 10m
-              memory: 20Mi
         - name: csi-resizer
-          image: mcr.microsoft.com/oss/kubernetes-csi/csi-resizer:v0.3.0
+          image: ${RESIZER_IMAGE}
           args:
-            - "-csi-address=$(ADDRESS)"
-            - "-v=5"
-            - "-leader-election"
+            - --csi-address=$(ADDRESS)
+            - --v=${LOG_LEVEL}
           env:
             - name: ADDRESS
-              value: /csi/csi.sock
+              value: /var/lib/csi/sockets/pluginproxy/csi.sock
           volumeMounts:
             - name: socket-dir
-              mountPath: /csi
+              mountPath: /var/lib/csi/sockets/pluginproxy/
           resources:
-            limits:
-              cpu: 1
-              memory: 1Gi
             requests:
+              memory: 50Mi
               cpu: 10m
-              memory: 20Mi
         - name: csi-snapshotter
-          image: mcr.microsoft.com/oss/kubernetes-csi/csi-snapshotter:v2.0.1
+          image: ${SNAPSHOTTER_IMAGE}
           args:
-            - "-csi-address=$(ADDRESS)"
-            - "-leader-election"
-            - "--v=5"
+            - --csi-address=$(ADDRESS)
+            - --v=${LOG_LEVEL}
           env:
-            - name: ADDRESS
-              value: /csi/csi.sock
+          - name: ADDRESS
+            value: /var/lib/csi/sockets/pluginproxy/csi.sock
           volumeMounts:
-            - name: socket-dir
-              mountPath: /csi
+          - mountPath: /var/lib/csi/sockets/pluginproxy/
+            name: socket-dir
           resources:
-            limits:
-              cpu: 1
-              memory: 1Gi
             requests:
+              memory: 50Mi
               cpu: 10m
-              memory: 20Mi
-        - name: liveness-probe
-          image: mcr.microsoft.com/oss/kubernetes-csi/livenessprobe:v1.1.0
+        - name: csi-liveness-probe
+          image: ${LIVENESS_PROBE_IMAGE}
           args:
             - --csi-address=/csi/csi.sock
-            - --connection-timeout=3s
-            - --health-port=29602
-            - --v=5
+            - --probe-timeout=3s
+            - --health-port=10301
           volumeMounts:
             - name: socket-dir
               mountPath: /csi
           resources:
-            limits:
-              cpu: 1
-              memory: 1Gi
             requests:
+              memory: 50Mi
               cpu: 10m
-              memory: 20Mi
       volumes:
         - name: socket-dir
           emptyDir: {}
@@ -265,7 +238,7 @@ var _controller_saYaml = []byte(`apiVersion: v1
 kind: ServiceAccount
 metadata:
   name: azure-disk-csi-driver-controller-sa
-  namespace: openshift-azure-disk-csi-driver
+  namespace: openshift-cluster-csi-drivers
 `)
 
 func controller_saYamlBytes() ([]byte, error) {
@@ -283,32 +256,13 @@ func controller_saYaml() (*asset, error) {
 	return a, nil
 }
 
-var _namespaceYaml = []byte(`apiVersion: v1
-kind: Namespace
-metadata:
-  name: openshift-azure-disk-csi-driver
-`)
-
-func namespaceYamlBytes() ([]byte, error) {
-	return _namespaceYaml, nil
-}
-
-func namespaceYaml() (*asset, error) {
-	bytes, err := namespaceYamlBytes()
-	if err != nil {
-		return nil, err
-	}
-
-	info := bindataFileInfo{name: "namespace.yaml", size: 0, mode: os.FileMode(0), modTime: time.Unix(0, 0)}
-	a := &asset{bytes: bytes, info: info}
-	return a, nil
-}
-
 var _nodeYaml = []byte(`kind: DaemonSet
 apiVersion: apps/v1
 metadata:
   name: azure-disk-csi-driver-node
-  namespace: openshift-azure-disk-csi-driver
+  namespace: openshift-cluster-csi-drivers
+  annotations:
+    config.openshift.io/inject-proxy: csi-driver
 spec:
   selector:
     matchLabels:
@@ -322,23 +276,20 @@ spec:
       serviceAccount: azure-disk-csi-driver-node-sa
       priorityClassName: system-node-critical
       tolerations:
-        - key: CriticalAddonsOnly
-          operator: Exists
+        - operator: Exists
+      nodeSelector:
+        kubernetes.io/os: linux
       containers:
         - name: csi-driver
-          image: mcr.microsoft.com/k8s/csi/azuredisk-csi:latest
+          securityContext:
+            privileged: true
+          image: ${DRIVER_IMAGE}
           args:
-            - "--v=5"
-            - "--endpoint=$(CSI_ENDPOINT)"
-            - "--nodeid=$(KUBE_NODE_NAME)"
-            - "--metrics-address=0.0.0.0:29605"
-          ports:
-            - containerPort: 29603
-              name: healthz
-              protocol: TCP
-            - containerPort: 29605
-              name: metrics
-              protocol: TCP
+            - --endpoint=$(CSI_ENDPOINT)
+            - --logtostderr
+            - --v=${LOG_LEVEL}
+            - --nodeid=$(KUBE_NODE_NAME)
+            # - --metrics-address=0.0.0.0:29605
           env:
             - name: AZURE_CREDENTIAL_FILE
               value: "/etc/kubernetes/cloud.conf"
@@ -349,8 +300,6 @@ spec:
                 fieldRef:
                   apiVersion: v1
                   fieldPath: spec.nodeName
-          securityContext:
-            privileged: true
           volumeMounts:
             - mountPath: /csi
               name: socket-dir
@@ -369,19 +318,31 @@ spec:
               name: sys-devices-dir
             - mountPath: /sys/class/scsi_host/
               name: scsi-host-dir
+          ports:
+            - name: healthz
+              # Due to hostNetwork, this port is open on all nodes!
+              containerPort: 10300
+              protocol: TCP
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: healthz
+            initialDelaySeconds: 10
+            timeoutSeconds: 3
+            periodSeconds: 10
+            failureThreshold: 5
           resources:
-            limits:
-              cpu: 1
-              memory: 1Gi
             requests:
+              memory: 50Mi
               cpu: 10m
-              memory: 20Mi
-        - name: node-driver-registrar
-          image: mcr.microsoft.com/oss/kubernetes-csi/csi-node-driver-registrar:v1.2.0
+        - name: csi-node-driver-registrar
+          securityContext:
+            privileged: true
+          image: ${NODE_DRIVER_REGISTRAR_IMAGE}
           args:
             - --csi-address=$(ADDRESS)
             - --kubelet-registration-path=$(DRIVER_REG_SOCK_PATH)
-            - --v=5
+            - --v=${LOG_LEVEL}
           lifecycle:
             preStop:
               exec:
@@ -397,12 +358,22 @@ spec:
             - name: registration-dir
               mountPath: /registration
           resources:
-            limits:
-              cpu: 1
-              memory: 1Gi
             requests:
+              memory: 50Mi
               cpu: 10m
-              memory: 20Mi
+        - name: csi-liveness-probe
+          image: ${LIVENESS_PROBE_IMAGE}
+          args:
+            - --csi-address=/csi/csi.sock
+            - --probe-timeout=3s
+            - --health-port=10300
+          volumeMounts:
+            - name: socket-dir
+              mountPath: /csi
+          resources:
+            requests:
+              memory: 50Mi
+              cpu: 10m
       volumes:
         - hostPath:
             path: /var/lib/kubelet/plugins/disk.csi.azure.com
@@ -456,7 +427,7 @@ var _node_saYaml = []byte(`apiVersion: v1
 kind: ServiceAccount
 metadata:
   name: azure-disk-csi-driver-node-sa
-  namespace: openshift-azure-disk-csi-driver
+  namespace: openshift-cluster-csi-drivers
 `)
 
 func node_saYamlBytes() ([]byte, error) {
@@ -481,7 +452,7 @@ metadata:
 subjects:
   - kind: ServiceAccount
     name: azure-disk-csi-driver-controller-sa
-    namespace: openshift-azure-disk-csi-driver
+    namespace: openshift-cluster-csi-drivers
 roleRef:
   kind: ClusterRole
   name: azure-disk-external-attacher-role
@@ -544,7 +515,7 @@ metadata:
 subjects:
   - kind: ServiceAccount
     name: azure-disk-csi-driver-controller-sa
-    namespace: openshift-azure-disk-csi-driver
+    namespace: openshift-cluster-csi-drivers
 roleRef:
   kind: ClusterRole
   name: azure-disk-privileged-role
@@ -573,7 +544,7 @@ metadata:
 subjects:
   - kind: ServiceAccount
     name: azure-disk-csi-driver-node-sa
-    namespace: openshift-azure-disk-csi-driver
+    namespace: openshift-cluster-csi-drivers
 roleRef:
   kind: ClusterRole
   name: azure-disk-privileged-role
@@ -630,7 +601,7 @@ metadata:
 subjects:
   - kind: ServiceAccount
     name: azure-disk-csi-driver-controller-sa
-    namespace: openshift-azure-disk-csi-driver
+    namespace: openshift-cluster-csi-drivers
 roleRef:
   kind: ClusterRole
   name: azure-disk-external-provisioner-role
@@ -699,7 +670,7 @@ metadata:
 subjects:
   - kind: ServiceAccount
     name: azure-disk-csi-driver-controller-sa
-    namespace: openshift-azure-disk-csi-driver
+    namespace: openshift-cluster-csi-drivers
 roleRef:
   kind: ClusterRole
   name: azure-disk-external-resizer-role
@@ -765,7 +736,7 @@ metadata:
 subjects:
   - kind: ServiceAccount
     name: azure-disk-csi-driver-controller-sa
-    namespace: openshift-azure-disk-csi-driver
+    namespace: openshift-cluster-csi-drivers
 roleRef:
   kind: ClusterRole
   name: azure-disk-external-snapshotter-role
@@ -848,9 +819,10 @@ metadata:
   name: managed-csi
 provisioner: disk.csi.azure.com
 parameters:
-  skuname: StandardSSD_LRS  # alias: storageaccounttype, available values: Standard_LRS, Premium_LRS, StandardSSD_LRS, UltraSSD_LRS
+  skuname: StandardSSD_LRS
+volumeBindingMode: WaitForFirstConsumer
+allowVolumeExpansion: true
 reclaimPolicy: Delete
-volumeBindingMode: WaitForFirstConsumer  # make sure ` + "`" + `volumeBindingMode` + "`" + ` is set as ` + "`" + `WaitForFirstConsumer` + "`" + `
 `)
 
 func storageclassYamlBytes() ([]byte, error) {
@@ -922,7 +894,6 @@ func AssetNames() []string {
 var _bindata = map[string]func() (*asset, error){
 	"controller.yaml":                         controllerYaml,
 	"controller_sa.yaml":                      controller_saYaml,
-	"namespace.yaml":                          namespaceYaml,
 	"node.yaml":                               nodeYaml,
 	"node_sa.yaml":                            node_saYaml,
 	"rbac/attacher_binding.yaml":              rbacAttacher_bindingYaml,
@@ -982,7 +953,6 @@ type bintree struct {
 var _bintree = &bintree{nil, map[string]*bintree{
 	"controller.yaml":    {controllerYaml, map[string]*bintree{}},
 	"controller_sa.yaml": {controller_saYaml, map[string]*bintree{}},
-	"namespace.yaml":     {namespaceYaml, map[string]*bintree{}},
 	"node.yaml":          {nodeYaml, map[string]*bintree{}},
 	"node_sa.yaml":       {node_saYaml, map[string]*bintree{}},
 	"rbac": {nil, map[string]*bintree{

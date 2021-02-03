@@ -5,7 +5,7 @@ metadata:
 subjects:
   - kind: ServiceAccount
     name: azure-disk-csi-driver-controller-sa
-    namespace: openshift-azure-disk-csi-driver
+    namespace: openshift-cluster-csi-drivers
 roleRef:
   kind: ClusterRole
   name: azure-disk-external-snapshotter-role
