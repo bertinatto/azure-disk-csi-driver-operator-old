@@ -1,7 +1,8 @@
 approvers:
-- bertinatto
 - jsafrane
 - tsmetana
 - gnufied
+- bertinatto
 - huffmanca
 component: "Storage"
+subcomponent: "Operators"
