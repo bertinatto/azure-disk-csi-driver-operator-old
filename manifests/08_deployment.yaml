@@ -19,7 +19,8 @@ spec:
         - start
         env:
         - name: DRIVER_IMAGE
-          value: quay.io/openshift/origin-azure-disk-csi-driver:latest
+          # TODO: replace with OCP image once it's ready
+          value: mcr.microsoft.com/k8s/csi/azuredisk-csi:latest
         - name: PROVISIONER_IMAGE
           value: quay.io/openshift/origin-csi-external-provisioner:latest
         - name: ATTACHER_IMAGE
@@ -36,7 +37,8 @@ spec:
           valueFrom:
             fieldRef:
               fieldPath: metadata.name
-        image: quay.io/openshift/origin-azure-disk-csi-driver-operator:latest
+         # TODO: replace with OCP image once it's ready
+        image: quay.io/bertinatto/azure-operator:v1
         imagePullPolicy: IfNotPresent
         name: azure-disk-csi-driver-operator
         resources:
